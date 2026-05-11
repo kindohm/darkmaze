@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APPNAME: myapp
+  APPNAME: darkmaze
   NODE_VERSION: 24.13.0
 
 jobs:
