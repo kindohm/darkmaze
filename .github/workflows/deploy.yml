@@ -21,6 +21,18 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
       - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
@@ -49,7 +61,7 @@ jobs:
             ./ \
             deploy@${{ secrets.DEPLOY_HOST }}:${RELEASE_DIR}/
 
-      - name: Install, build, and activate release
+      - name: Install production dependencies and activate release
         run: |
           ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << EOF
             set -euo pipefail
@@ -71,8 +83,7 @@ jobs:
             nvm install "\$NODE_VERSION"
             nvm use "\$NODE_VERSION"
 
-            npm ci
-            npm run build
+            npm ci --omit=dev
 
             ln -sfn "\$RELEASE_DIR" "\$CURRENT_LINK"
 
