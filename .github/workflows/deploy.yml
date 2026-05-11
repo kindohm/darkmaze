@@ -1,0 +1,81 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+env:
+  APPNAME: myapp
+  NODE_VERSION: 24.13.0
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Create release directory
+        run: |
+          RELEASE_ID="$(date +%Y%m%d%H%M%S)"
+          echo "RELEASE_ID=$RELEASE_ID" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR=/opt/${APPNAME}/app/releases/$RELEASE_ID" >> "$GITHUB_ENV"
+
+          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} \
+            "mkdir -p /opt/${APPNAME}/app/releases/$RELEASE_ID"
+
+      - name: Copy code to release directory
+        run: |
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            --exclude ".git" \
+            --exclude ".github" \
+            --exclude "node_modules" \
+            --exclude ".env" \
+            ./ \
+            deploy@${{ secrets.DEPLOY_HOST }}:${RELEASE_DIR}/
+
+      - name: Install, build, and activate release
+        run: |
+          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << EOF
+            set -euo pipefail
+
+            APPNAME="${APPNAME}"
+            NODE_VERSION="${NODE_VERSION}"
+            RELEASE_DIR="${RELEASE_DIR}"
+            SHARED_DIR="/opt/${APPNAME}/app/shared"
+            CURRENT_LINK="/opt/${APPNAME}/app/current"
+            SERVICE_NAME="${APPNAME}.service"
+
+            export NVM_DIR="/home/deploy/.nvm"
+            source "\$NVM_DIR/nvm.sh"
+
+            cd "\$RELEASE_DIR"
+
+            ln -sfn "\$SHARED_DIR/.env" "\$RELEASE_DIR/.env"
+
+            nvm install "\$NODE_VERSION"
+            nvm use "\$NODE_VERSION"
+
+            npm ci
+            npm run build
+
+            ln -sfn "\$RELEASE_DIR" "\$CURRENT_LINK"
+
+            sudo systemctl restart "\$SERVICE_NAME"
+            sudo systemctl status "\$SERVICE_NAME" --no-pager
+          EOF
