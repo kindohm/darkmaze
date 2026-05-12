@@ -43,7 +43,7 @@ jobs:
 
       - name: Verify deploy host
         run: |
-          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << EOF
+          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << 'EOF'
             set -euo pipefail
 
             test -r /home/deploy/.nvm/nvm.sh
