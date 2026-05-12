@@ -7,6 +7,11 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const port = Number(process.env.PORT ?? SERVER_PORT);
+
+if (!Number.isInteger(port) || port <= 0) {
+  throw new Error(`Invalid PORT: ${process.env.PORT}`);
+}
 
 const app = express();
 const server = createServer(app);
@@ -22,6 +27,6 @@ app.get("/{*splat}", (_req, res) => {
 
 wss.on("connection", handleConnection);
 
-server.listen(SERVER_PORT, () => {
-  console.log(`Maze server running on http://localhost:${SERVER_PORT}`);
+server.listen(port, () => {
+  console.log(`Maze server running on http://localhost:${port}`);
 });
