@@ -74,7 +74,7 @@ jobs:
 
       - name: Install production dependencies and activate release
         run: |
-          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << EOF
+          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << 'EOF'
             set -euo pipefail
 
             APPNAME="${APPNAME}"
