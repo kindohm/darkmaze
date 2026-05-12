@@ -41,6 +41,17 @@ jobs:
 
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Verify deploy host
+        run: |
+          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << EOF
+            set -euo pipefail
+
+            test -r /home/deploy/.nvm/nvm.sh
+            test -d /opt/${APPNAME}/app/shared
+            test -f /opt/${APPNAME}/app/shared/.env
+            sudo -n /usr/bin/systemctl status "${APPNAME}" >/dev/null
+          EOF
+
       - name: Create release directory
         run: |
           RELEASE_ID="$(date +%Y%m%d%H%M%S)"
@@ -71,7 +82,7 @@ jobs:
             RELEASE_DIR="${RELEASE_DIR}"
             SHARED_DIR="/opt/${APPNAME}/app/shared"
             CURRENT_LINK="/opt/${APPNAME}/app/current"
-            SERVICE_NAME="${APPNAME}.service"
+            SERVICE_NAME="${APPNAME}"
 
             export NVM_DIR="/home/deploy/.nvm"
             source "\$NVM_DIR/nvm.sh"
@@ -87,6 +98,6 @@ jobs:
 
             ln -sfn "\$RELEASE_DIR" "\$CURRENT_LINK"
 
-            sudo systemctl restart "\$SERVICE_NAME"
-            sudo systemctl status "\$SERVICE_NAME" --no-pager
+            sudo -n /usr/bin/systemctl restart "\$SERVICE_NAME"
+            sudo -n /usr/bin/systemctl status "\$SERVICE_NAME"
           EOF
