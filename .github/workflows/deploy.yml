@@ -49,7 +49,11 @@ jobs:
             test -r /home/deploy/.nvm/nvm.sh
             test -d /opt/${APPNAME}/app/shared
             test -f /opt/${APPNAME}/app/shared/.env
-            sudo -n /usr/bin/systemctl status "${APPNAME}" >/dev/null
+            sudo -n /usr/bin/systemctl status "${APPNAME}" >/dev/null || STATUS_CODE="\$?"
+
+            if [ "\${STATUS_CODE:-0}" -ne 0 ] && [ "\${STATUS_CODE:-0}" -ne 3 ]; then
+              exit "\$STATUS_CODE"
+            fi
           EOF
 
       - name: Create release directory
