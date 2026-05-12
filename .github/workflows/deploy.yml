@@ -43,9 +43,7 @@ jobs:
 
       - name: Verify deploy host
         run: |
-          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} 
-            APPNAME="${APPNAME}" \
-            << 'EOF'
+          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << EOF
             set -euo pipefail
 
             test -r /home/deploy/.nvm/nvm.sh
@@ -61,7 +59,6 @@ jobs:
           echo "RELEASE_DIR=/opt/${APPNAME}/app/releases/$RELEASE_ID" >> "$GITHUB_ENV"
 
           ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} \
-            APPNAME="${APPNAME}" \
             "mkdir -p /opt/${APPNAME}/app/releases/$RELEASE_ID"
 
       - name: Copy code to release directory
@@ -77,7 +74,7 @@ jobs:
 
       - name: Install production dependencies and activate release
         run: |
-          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          ssh -i ~/.ssh/deploy_key deploy@${{ secrets.DEPLOY_HOST }} << EOF
             set -euo pipefail
 
             APPNAME="${APPNAME}"
