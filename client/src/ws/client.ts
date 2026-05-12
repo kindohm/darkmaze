@@ -10,12 +10,15 @@ export type WsClient = {
   offMessage: (handler: MessageHandler) => void;
 };
 
-export const createWsClient = (url?: string): WsClient => {
+type WsLocation = Pick<Location, "host" | "protocol">;
+
+export const createWsClient = (url?: string, location: WsLocation = window.location): WsClient => {
   let ws: WebSocket | null = null;
   const handlers = new Set<MessageHandler>();
 
   const connect = (): void => {
-    const wsUrl = url ?? `ws://${window.location.host}`;
+    const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = url ?? `${wsProtocol}//${location.host}`;
     ws = new WebSocket(wsUrl);
 
     ws.onmessage = (event) => {

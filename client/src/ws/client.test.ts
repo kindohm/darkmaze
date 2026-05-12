@@ -44,6 +44,26 @@ describe("WsClient", () => {
     expect(mockWsInstances[0].url).toBe("ws://localhost:3000");
   });
 
+  it("uses secure websocket on secure pages", () => {
+    const client = createWsClient(undefined, {
+      host: "darkmaze.m8ball.xyz",
+      protocol: "https:",
+    });
+    client.connect();
+
+    expect(mockWsInstances[0].url).toBe("wss://darkmaze.m8ball.xyz");
+  });
+
+  it("uses plain websocket on local pages", () => {
+    const client = createWsClient(undefined, {
+      host: "localhost:5173",
+      protocol: "http:",
+    });
+    client.connect();
+
+    expect(mockWsInstances[0].url).toBe("ws://localhost:5173");
+  });
+
   it("sends messages as JSON", () => {
     const client = createWsClient("ws://localhost:3000");
     client.connect();
