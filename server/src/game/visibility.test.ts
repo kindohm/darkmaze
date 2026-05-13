@@ -43,4 +43,13 @@ describe("revealAround", () => {
     revealAround({ x: 5, y: 5 }, revealed);
     expect(revealed[0][0]).toBe(true);
   });
+
+  it("returns only newly revealed tiles", () => {
+    const revealed = makeRevealed(10, 10);
+    const first = revealAround({ x: 5, y: 5 }, revealed);
+    const second = revealAround({ x: 5, y: 5 }, revealed);
+
+    expect(first.length).toBeGreaterThan(0);
+    expect(second).toEqual([]);
+  });
 });

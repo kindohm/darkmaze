@@ -53,6 +53,7 @@ export const moveNpcsRandom = (maze: TileType[][], players: Player[], roomId = "
 };
 
 const JITTER_CHANCE = 0.2; // 20% chance to move randomly instead of optimally
+const MAX_PATH_SEARCH_TILES = 2500;
 
 export const chooseDirection = (
   from: Position,
@@ -113,6 +114,7 @@ export const bfsFirstStep = (
 
   while (queue.length > 0) {
     const { pos, firstDir } = queue.shift()!;
+    if (visited.size > MAX_PATH_SEARCH_TILES) return null;
 
     for (const { dx, dy } of DIRECTION_DELTAS) {
       const nx = pos.x + dx;
@@ -148,6 +150,7 @@ const findNearestPlayer = (
 
   while (queue.length > 0) {
     const cur = queue.shift()!;
+    if (visited.size > MAX_PATH_SEARCH_TILES) return null;
 
     for (const { dx, dy } of DIRECTION_DELTAS) {
       const nx = cur.x + dx;

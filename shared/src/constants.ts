@@ -22,4 +22,4 @@ export const NPC_COLOR = "#000000";
 export const NPC_SPEED_MULTIPLIER = 2; // moves every MOVE_INTERVAL_MS * this
 export const NPC_DEBUFF_DURATION_MS = 20_000;
 export const NPC_MIN_SPAWN_DISTANCE = 15; // min manhattan dist from any player
-export const NPC_COUNT_PER_PLAYER = 2; // NPCs spawned per player
+export const NPC_COUNT_PER_PLAYER = 1; // NPCs spawned per player

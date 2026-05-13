@@ -107,8 +107,8 @@ export type GameStartMessage = {
 export type StateUpdateMessage = {
   type: "state-update";
   players: Player[];
-  revealedTiles: boolean[][];
   npcs: Npc[];
+  revealedTilesDelta?: Position[];
 };
 
 export type GameOverMessage = {

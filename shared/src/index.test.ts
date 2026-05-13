@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_MAP_SIZE, MIN_MAP_SIZE, MAX_MAP_SIZE, REVEAL_RADIUS, PLAYER_COLORS } from "./constants.js";
+import { DEFAULT_MAP_SIZE, MIN_MAP_SIZE, MAX_MAP_SIZE, REVEAL_RADIUS, PLAYER_COLORS, NPC_COUNT_PER_PLAYER } from "./constants.js";
 import type { TileType, Direction, Player, GameState } from "./types.js";
 
 describe("constants", () => {
@@ -21,6 +21,10 @@ describe("constants", () => {
 
   it("has at least 8 player colors", () => {
     expect(PLAYER_COLORS.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it("spawns one NPC per player", () => {
+    expect(NPC_COUNT_PER_PLAYER).toBe(1);
   });
 });
 

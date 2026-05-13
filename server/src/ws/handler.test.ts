@@ -201,7 +201,12 @@ describe("WebSocket handler", () => {
     const hasUpdate = messages.some(
       (m) => m.type === "state-update" || m.type === "game-over"
     );
+    const stateUpdate = messages.find((m) => m.type === "state-update");
+
     expect(hasUpdate).toBe(true);
+    if (stateUpdate) {
+      expect("revealedTiles" in stateUpdate).toBe(false);
+    }
     vi.useRealTimers();
   });
 

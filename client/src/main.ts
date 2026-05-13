@@ -47,6 +47,7 @@ let usernameInstance: ReturnType<typeof createUsernameScreen> | null = null;
 let lobbyInstance: ReturnType<typeof createLobby> | null = null;
 let gameOverInstance: ReturnType<typeof createGameOver> | null = null;
 let animFrameId: number | null = null;
+let needsRender = true;
 
 const updateHeader = (): void => {
   if (localPlayerName) {
@@ -93,8 +94,26 @@ const showScreen = (screen: Screen): void => {
 };
 
 const gameLoop = (): void => {
-  renderer.render(gameState);
+  const debuffActive = gameState.debuffUntil !== null && Date.now() < gameState.debuffUntil;
+  if (needsRender || debuffActive) {
+    renderer.render(gameState);
+    needsRender = false;
+  }
   animFrameId = requestAnimationFrame(gameLoop);
+};
+
+const markRenderDirty = (): void => {
+  needsRender = true;
+};
+
+const applyRevealDelta = (revealedTilesDelta: StateUpdateMessage["revealedTilesDelta"]): void => {
+  if (!revealedTilesDelta) return;
+
+  for (const tile of revealedTilesDelta) {
+    if (gameState.revealedTiles[tile.y]?.[tile.x] !== undefined) {
+      gameState.revealedTiles[tile.y][tile.x] = true;
+    }
+  }
 };
 
 const showToast = (message: string): void => {
@@ -145,6 +164,7 @@ const handleMessage = (msg: ServerMessage): void => {
         npcs: startMsg.npcs,
         debuffUntil: null,
       };
+      markRenderDirty();
       showScreen("game");
       break;
     }
@@ -152,8 +172,9 @@ const handleMessage = (msg: ServerMessage): void => {
     case "state-update": {
       const updateMsg = msg as StateUpdateMessage;
       gameState.players = updateMsg.players;
-      gameState.revealedTiles = updateMsg.revealedTiles;
       gameState.npcs = updateMsg.npcs;
+      applyRevealDelta(updateMsg.revealedTilesDelta);
+      markRenderDirty();
       break;
     }
 
@@ -161,6 +182,7 @@ const handleMessage = (msg: ServerMessage): void => {
       const overMsg = msg as GameOverMessage;
       gameState.players = overMsg.players;
       gameState.revealedTiles = overMsg.revealedTiles;
+      markRenderDirty();
 
       inputHandler.stop();
       if (animFrameId) {
@@ -192,6 +214,7 @@ const handleMessage = (msg: ServerMessage): void => {
       const debuffMsg = msg as DebuffAppliedMessage;
       if (debuffMsg.playerId === localPlayerId) {
         gameState.debuffUntil = Date.now() + debuffMsg.durationMs;
+        markRenderDirty();
       }
       showToast(`💀 ${debuffMsg.playerName} was attacked and slowed!`);
       break;
@@ -207,5 +230,6 @@ showScreen("username");
 window.addEventListener("resize", () => {
   if (currentScreen === "game") {
     renderer.resize();
+    markRenderDirty();
   }
 });

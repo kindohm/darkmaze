@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import type { ClientMessage, ServerMessage } from "maze-shared";
+import type { ClientMessage, Position, ServerMessage } from "maze-shared";
 import { MOVE_INTERVAL_MS, NPC_SPEED_MULTIPLIER, NPC_DEBUFF_DURATION_MS, NPC_COUNT_PER_PLAYER } from "maze-shared";
 import {
   createRoom,
@@ -29,6 +29,10 @@ type ClientSocket = WebSocket & {
 
 const clients = new Set<ClientSocket>();
 const npcTickIntervals = new Map<string, ReturnType<typeof setInterval>>();
+const stateUpdateTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingRevealDeltas = new Map<string, Map<string, Position>>();
+
+const STATE_BROADCAST_INTERVAL_MS = 66;
 
 let nextId = 1;
 let nextRoomId = 1;
@@ -66,12 +70,37 @@ const broadcastRoomUpdate = (roomId: string): void => {
 };
 
 const broadcastStateUpdate = (room: ServerRoom): void => {
+  const deltaMap = pendingRevealDeltas.get(room.id);
+  pendingRevealDeltas.delete(room.id);
+
   broadcastRoom(room.id, {
     type: "state-update",
     players: room.players,
-    revealedTiles: room.revealedTiles,
     npcs: getNpcs(room.id),
+    revealedTilesDelta: deltaMap ? [...deltaMap.values()] : undefined,
   });
+};
+
+const addRevealDelta = (roomId: string, revealedTiles: Position[]): void => {
+  if (revealedTiles.length === 0) return;
+
+  const deltaMap = pendingRevealDeltas.get(roomId) ?? new Map<string, Position>();
+  for (const tile of revealedTiles) {
+    deltaMap.set(`${tile.x},${tile.y}`, tile);
+  }
+  pendingRevealDeltas.set(roomId, deltaMap);
+};
+
+const scheduleStateUpdate = (room: ServerRoom): void => {
+  if (stateUpdateTimeouts.has(room.id)) return;
+
+  stateUpdateTimeouts.set(room.id, setTimeout(() => {
+    stateUpdateTimeouts.delete(room.id);
+    const latestRoom = getRoom(room.id);
+    if (latestRoom?.status === "playing") {
+      broadcastStateUpdate(latestRoom);
+    }
+  }, STATE_BROADCAST_INTERVAL_MS));
 };
 
 const stopNpcTick = (roomId: string): void => {
@@ -79,6 +108,14 @@ const stopNpcTick = (roomId: string): void => {
   if (!interval) return;
   clearInterval(interval);
   npcTickIntervals.delete(roomId);
+};
+
+const stopStateUpdate = (roomId: string): void => {
+  const timeout = stateUpdateTimeouts.get(roomId);
+  if (!timeout) return;
+  clearTimeout(timeout);
+  stateUpdateTimeouts.delete(roomId);
+  pendingRevealDeltas.delete(roomId);
 };
 
 const startNpcTick = (roomId: string): void => {
@@ -108,7 +145,7 @@ const startNpcTick = (roomId: string): void => {
     }
 
     ensureNpcCount(room.players.length * NPC_COUNT_PER_PLAYER, room.maze, room.players, room.id);
-    broadcastStateUpdate(room);
+    scheduleStateUpdate(room);
   }, tickMs));
 };
 
@@ -123,6 +160,7 @@ const leaveCurrentRoom = (ws: ClientSocket): void => {
   if (!room) return;
   if (room.players.length === 0) {
     stopNpcTick(previousRoomId);
+    stopStateUpdate(previousRoomId);
     resetNpcs(previousRoomId);
     resetDebuffs(previousRoomId);
     resetStats(previousRoomId);
@@ -215,7 +253,7 @@ const handleMove = (ws: ClientSocket, msg: ClientMessage & { type: "move" }): vo
   if (newPos.x === player.position.x && newPos.y === player.position.y) return;
 
   player.position = newPos;
-  revealAround(newPos, room.revealedTiles);
+  addRevealDelta(room.id, revealAround(newPos, room.revealedTiles));
   recordStep(player.id, newPos, room.goalPosition!, room.id);
 
   const collisions = checkNpcPlayerCollisions(room.players, room.id);
@@ -234,6 +272,7 @@ const handleMove = (ws: ClientSocket, msg: ClientMessage & { type: "move" }): vo
 
   if (checkObjective(player, room.maze)) {
     stopNpcTick(room.id);
+    stopStateUpdate(room.id);
     endGame(player, room.id);
     broadcastRoom(room.id, {
       type: "game-over",
@@ -247,7 +286,7 @@ const handleMove = (ws: ClientSocket, msg: ClientMessage & { type: "move" }): vo
     return;
   }
 
-  broadcastStateUpdate(room);
+  scheduleStateUpdate(room);
 };
 
 const handleReturnToLobby = (ws: ClientSocket): void => {
@@ -256,6 +295,7 @@ const handleReturnToLobby = (ws: ClientSocket): void => {
   if (!room) return;
 
   stopNpcTick(room.id);
+  stopStateUpdate(room.id);
   resetNpcs(room.id);
   resetDebuffs(room.id);
   returnToLobby(room.id);
@@ -311,7 +351,10 @@ export const handleConnection = (ws: ClientSocket): void => {
 
 export const resetHandler = (): void => {
   npcTickIntervals.forEach((interval) => clearInterval(interval));
+  stateUpdateTimeouts.forEach((timeout) => clearTimeout(timeout));
   npcTickIntervals.clear();
+  stateUpdateTimeouts.clear();
+  pendingRevealDeltas.clear();
   clients.clear();
   nextId = 1;
   nextRoomId = 1;
