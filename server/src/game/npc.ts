@@ -4,34 +4,47 @@ import { movePlayer } from "./movement.js";
 
 const DIRECTIONS: Direction[] = ["up", "down", "left", "right"];
 
-let npcs: Npc[] = [];
-let nextNpcId = 1;
+type NpcState = {
+  npcs: Npc[];
+  nextNpcId: number;
+};
 
-export const getNpcs = (): Npc[] => npcs;
+let states: Record<string, NpcState> = {
+  default: { npcs: [], nextNpcId: 1 },
+};
 
-export const resetNpcs = (): void => {
-  npcs = [];
-  nextNpcId = 1;
+const getState = (roomId = "default"): NpcState => {
+  states[roomId] = states[roomId] ?? { npcs: [], nextNpcId: 1 };
+  return states[roomId];
+};
+
+export const getNpcs = (roomId = "default"): Npc[] => getState(roomId).npcs;
+
+export const resetNpcs = (roomId = "default"): void => {
+  states[roomId] = { npcs: [], nextNpcId: 1 };
 };
 
 export const spawnNpc = (
   maze: TileType[][],
-  players: Player[]
+  players: Player[],
+  roomId = "default"
 ): Npc | null => {
+  const state = getState(roomId);
   const pos = findSpawnPosition(maze, players);
   if (!pos) return null;
 
-  const npc: Npc = { id: `npc-${nextNpcId++}`, position: pos };
-  npcs.push(npc);
+  const npc: Npc = { id: `npc-${state.nextNpcId++}`, position: pos };
+  state.npcs.push(npc);
   return npc;
 };
 
-export const removeNpc = (id: string): void => {
-  npcs = npcs.filter((n) => n.id !== id);
+export const removeNpc = (id: string, roomId = "default"): void => {
+  const state = getState(roomId);
+  state.npcs = state.npcs.filter((n) => n.id !== id);
 };
 
-export const moveNpcsRandom = (maze: TileType[][], players: Player[]): void => {
-  for (const npc of npcs) {
+export const moveNpcsRandom = (maze: TileType[][], players: Player[], roomId = "default"): void => {
+  for (const npc of getState(roomId).npcs) {
     const dir = chooseDirection(npc.position, maze, players);
     if (dir) {
       npc.position = movePlayer(npc.position, dir, maze);
@@ -153,11 +166,12 @@ const findNearestPlayer = (
 };
 
 export const checkNpcPlayerCollisions = (
-  players: Player[]
+  players: Player[],
+  roomId = "default"
 ): { npcId: string; playerId: string }[] => {
   const collisions: { npcId: string; playerId: string }[] = [];
 
-  for (const npc of npcs) {
+  for (const npc of getState(roomId).npcs) {
     for (const player of players) {
       if (npc.position.x === player.position.x && npc.position.y === player.position.y) {
         collisions.push({ npcId: npc.id, playerId: player.id });
@@ -172,10 +186,12 @@ export const checkNpcPlayerCollisions = (
 export const ensureNpcCount = (
   targetCount: number,
   maze: TileType[][],
-  players: Player[]
+  players: Player[],
+  roomId = "default"
 ): void => {
-  while (npcs.length < targetCount) {
-    const spawned = spawnNpc(maze, players);
+  const state = getState(roomId);
+  while (state.npcs.length < targetCount) {
+    const spawned = spawnNpc(maze, players, roomId);
     if (!spawned) break; // no valid positions
   }
 };

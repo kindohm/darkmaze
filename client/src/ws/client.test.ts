@@ -67,10 +67,10 @@ describe("WsClient", () => {
   it("sends messages as JSON", () => {
     const client = createWsClient("ws://localhost:3000");
     client.connect();
-    client.send({ type: "join", name: "Alice" });
+    client.send({ type: "set-username", name: "Alice" });
 
     expect(mockWsInstances[0].send).toHaveBeenCalledWith(
-      JSON.stringify({ type: "join", name: "Alice" })
+      JSON.stringify({ type: "set-username", name: "Alice" })
     );
   });
 

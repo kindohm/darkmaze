@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { handleConnection, resetHandler } from "./handler.js";
-import { resetState, getState } from "../game/state.js";
+import { resetState, getRooms, getRoom } from "../game/state.js";
 import type { ClientMessage, ServerMessage } from "maze-shared";
 
 type MockWS = {
   readyState: number;
   OPEN: number;
   playerId?: string;
+  username?: string;
+  roomId?: string;
   send: ReturnType<typeof vi.fn>;
   on: ReturnType<typeof vi.fn>;
   listeners: Record<string, ((...args: unknown[]) => void)[]>;
@@ -34,8 +36,22 @@ const sendMessage = (ws: MockWS, msg: ClientMessage): void => {
   messageHandlers.forEach((handler) => handler(JSON.stringify(msg)));
 };
 
+const close = (ws: MockWS): void => {
+  const closeHandlers = ws.listeners["close"] || [];
+  closeHandlers.forEach((handler) => handler());
+};
+
 const getAllSent = (ws: MockWS): ServerMessage[] =>
   ws.send.mock.calls.map((call: unknown[]) => JSON.parse(call[0] as string));
+
+const joinWithName = (ws: MockWS, name = "Alice"): void => {
+  sendMessage(ws, { type: "set-username", name });
+};
+
+const createRoomFor = (ws: MockWS, name = "Room"): string => {
+  sendMessage(ws, { type: "create-room", name });
+  return getRooms()[0].id;
+};
 
 describe("WebSocket handler", () => {
   beforeEach(() => {
@@ -43,10 +59,10 @@ describe("WebSocket handler", () => {
     resetHandler();
   });
 
-  it("assigns player id on join", () => {
+  it("assigns player id on username", () => {
     const ws = createMockWs();
     handleConnection(ws as unknown as import("ws").WebSocket);
-    sendMessage(ws, { type: "join", name: "Alice" });
+    joinWithName(ws);
 
     const messages = getAllSent(ws);
     const idMsg = messages.find((m) => m.type === "player-id");
@@ -54,57 +70,133 @@ describe("WebSocket handler", () => {
     expect((idMsg as { id: string }).id).toMatch(/^player-/);
   });
 
-  it("broadcasts lobby update on join", () => {
+  it("creates room and joins creator", () => {
+    const ws = createMockWs();
+    handleConnection(ws as unknown as import("ws").WebSocket);
+    joinWithName(ws, "Alice");
+    createRoomFor(ws, "Alpha");
+
+    const room = getRooms()[0];
+    expect(room.name).toBe("Alpha");
+    expect(room.players[0].name).toBe("Alice");
+    expect(room.creatorId).toBe(ws.playerId);
+  });
+
+  it("does not create room before username", () => {
+    const ws = createMockWs();
+    handleConnection(ws as unknown as import("ws").WebSocket);
+
+    sendMessage(ws, { type: "create-room", name: "Alpha" });
+
+    expect(getRooms()).toHaveLength(0);
+  });
+
+  it("broadcasts rooms update when room is created", () => {
     const ws1 = createMockWs();
     const ws2 = createMockWs();
     handleConnection(ws1 as unknown as import("ws").WebSocket);
     handleConnection(ws2 as unknown as import("ws").WebSocket);
 
-    sendMessage(ws1, { type: "join", name: "Alice" });
-    sendMessage(ws2, { type: "join", name: "Bob" });
+    joinWithName(ws1, "Alice");
+    createRoomFor(ws1, "Alpha");
 
-    const messages = getAllSent(ws1);
-    const lobbyMsgs = messages.filter((m) => m.type === "lobby-update");
-    expect(lobbyMsgs.length).toBeGreaterThanOrEqual(1);
+    const messages = getAllSent(ws2);
+    const roomsMsgs = messages.filter((m) => m.type === "rooms-update");
+    expect(roomsMsgs.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("starts game and broadcasts game-start", () => {
+  it("joins an existing lobby room", () => {
+    const ws1 = createMockWs();
+    const ws2 = createMockWs();
+    handleConnection(ws1 as unknown as import("ws").WebSocket);
+    handleConnection(ws2 as unknown as import("ws").WebSocket);
+
+    joinWithName(ws1, "Alice");
+    const roomId = createRoomFor(ws1, "Alpha");
+    joinWithName(ws2, "Bob");
+    sendMessage(ws2, { type: "join-room", roomId });
+
+    expect(getRoom(roomId)?.players.map((p) => p.name)).toEqual(["Alice", "Bob"]);
+  });
+
+  it("does not join room before username", () => {
+    const creator = createMockWs();
+    const guest = createMockWs();
+    handleConnection(creator as unknown as import("ws").WebSocket);
+    handleConnection(guest as unknown as import("ws").WebSocket);
+
+    joinWithName(creator, "Alice");
+    const roomId = createRoomFor(creator, "Alpha");
+    sendMessage(guest, { type: "join-room", roomId });
+
+    expect(getRoom(roomId)?.players.map((p) => p.name)).toEqual(["Alice"]);
+  });
+
+  it("only room creator can start game", () => {
+    const creator = createMockWs();
+    const guest = createMockWs();
+    handleConnection(creator as unknown as import("ws").WebSocket);
+    handleConnection(guest as unknown as import("ws").WebSocket);
+
+    joinWithName(creator, "Alice");
+    const roomId = createRoomFor(creator, "Alpha");
+    joinWithName(guest, "Bob");
+    sendMessage(guest, { type: "join-room", roomId });
+
+    sendMessage(guest, { type: "start" });
+    expect(getRoom(roomId)?.status).toBe("lobby");
+
+    sendMessage(creator, { type: "start", mapSize: 50 });
+    expect(getRoom(roomId)?.status).toBe("playing");
+  });
+
+  it("starts game and broadcasts game-start to room", () => {
     const ws = createMockWs();
     handleConnection(ws as unknown as import("ws").WebSocket);
-    sendMessage(ws, { type: "join", name: "Alice" });
-    sendMessage(ws, { type: "start" });
+    joinWithName(ws, "Alice");
+    const roomId = createRoomFor(ws, "Alpha");
+    sendMessage(ws, { type: "start", mapSize: 50 });
 
     const messages = getAllSent(ws);
     const startMsg = messages.find((m) => m.type === "game-start");
     expect(startMsg).toBeDefined();
-    expect(getState().status).toBe("playing");
+    expect(getRoom(roomId)?.status).toBe("playing");
   });
 
-  it("does not start with no players", () => {
-    const ws = createMockWs();
-    handleConnection(ws as unknown as import("ws").WebSocket);
-    sendMessage(ws, { type: "start" });
+  it("scopes game start to one room", () => {
+    const ws1 = createMockWs();
+    const ws2 = createMockWs();
+    handleConnection(ws1 as unknown as import("ws").WebSocket);
+    handleConnection(ws2 as unknown as import("ws").WebSocket);
 
-    expect(getState().status).toBe("lobby");
+    joinWithName(ws1, "Alice");
+    const roomOneId = createRoomFor(ws1, "Alpha");
+    joinWithName(ws2, "Bob");
+    sendMessage(ws2, { type: "create-room", name: "Beta" });
+    const roomTwoId = getRooms().find((room) => room.id !== roomOneId)!.id;
+
+    sendMessage(ws1, { type: "start", mapSize: 50 });
+
+    expect(getRoom(roomOneId)?.status).toBe("playing");
+    expect(getRoom(roomTwoId)?.status).toBe("lobby");
   });
 
   it("handles move and broadcasts state update", () => {
     vi.useFakeTimers();
     const ws = createMockWs();
     handleConnection(ws as unknown as import("ws").WebSocket);
-    sendMessage(ws, { type: "join", name: "Alice" });
-    sendMessage(ws, { type: "start" });
+    joinWithName(ws, "Alice");
+    createRoomFor(ws, "Alpha");
+    sendMessage(ws, { type: "start", mapSize: 50 });
 
     ws.send.mockClear();
 
-    // Try all directions — cave map is random, some may be walls
     const directions = ["up", "down", "left", "right"] as const;
     for (const dir of directions) {
       sendMessage(ws, { type: "move", direction: dir });
-      vi.advanceTimersByTime(200); // advance past rate limit
+      vi.advanceTimersByTime(200);
     }
 
-    // At least one move should produce a state-update or game-over
     const messages = getAllSent(ws);
     const hasUpdate = messages.some(
       (m) => m.type === "state-update" || m.type === "game-over"
@@ -113,29 +205,27 @@ describe("WebSocket handler", () => {
     vi.useRealTimers();
   });
 
-  it("handles disconnect and removes player", () => {
+  it("removes player from room on disconnect", () => {
     const ws = createMockWs();
     handleConnection(ws as unknown as import("ws").WebSocket);
-    sendMessage(ws, { type: "join", name: "Alice" });
+    joinWithName(ws, "Alice");
+    const roomId = createRoomFor(ws, "Alpha");
 
-    expect(getState().players).toHaveLength(1);
+    close(ws);
 
-    // Trigger close
-    const closeHandlers = ws.listeners["close"] || [];
-    closeHandlers.forEach((handler) => handler());
-
-    expect(getState().players).toHaveLength(0);
+    expect(getRoom(roomId)).toBeUndefined();
   });
 
-  it("returns to lobby on return-to-lobby message", () => {
+  it("returns only current room to lobby", () => {
     const ws = createMockWs();
     handleConnection(ws as unknown as import("ws").WebSocket);
-    sendMessage(ws, { type: "join", name: "Alice" });
-    sendMessage(ws, { type: "start" });
+    joinWithName(ws, "Alice");
+    const roomId = createRoomFor(ws, "Alpha");
+    sendMessage(ws, { type: "start", mapSize: 50 });
 
-    expect(getState().status).toBe("playing");
+    expect(getRoom(roomId)?.status).toBe("playing");
 
     sendMessage(ws, { type: "return-to-lobby" });
-    expect(getState().status).toBe("lobby");
+    expect(getRoom(roomId)?.status).toBe("lobby");
   });
 });

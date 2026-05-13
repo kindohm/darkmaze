@@ -79,22 +79,64 @@
 
     /* Lobby */
     #lobby {
-      text-align: center;
+      width: min(1080px, calc(100vw - 32px));
+    }
+
+    #room-board {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 1rem;
+      align-items: stretch;
+    }
+
+    #room-list-panel,
+    #current-room-panel {
+      min-height: 480px;
+      border: 1px solid #263241;
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(19, 31, 43, 0.92), rgba(9, 12, 18, 0.96)),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 18px);
+      padding: 1.25rem;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+    }
+
+    .panel-kicker {
+      color: #75e0c3;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 0.35rem;
+    }
+
+    #lobby h1,
+    #current-room h2,
+    .room-waiting h2 {
+      color: #f8fafc;
+      letter-spacing: 0;
+      line-height: 1.05;
     }
 
     #lobby h1 {
-      font-size: 3rem;
-      margin-bottom: 2rem;
+      font-size: clamp(2rem, 6vw, 3.6rem);
+      margin-bottom: 1.25rem;
     }
 
-    #join-form, #change-name-form, #username-form {
+    #current-room h2,
+    .room-waiting h2 {
+      font-size: 2rem;
+      margin-bottom: 0.35rem;
+    }
+
+    #join-form, #change-name-form, #username-form, #create-room-form {
       display: flex;
       gap: 0.5rem;
       margin-bottom: 1.5rem;
       justify-content: center;
     }
 
-    #name-input {
+    #name-input, #room-name-input, #map-size-input {
       padding: 0.75rem 1rem;
       font-size: 1rem;
       border: 2px solid #374151;
@@ -105,11 +147,19 @@
       width: 220px;
     }
 
-    #name-input:focus {
-      border-color: #f59e0b;
+    #room-name-input {
+      width: min(100%, 280px);
     }
 
-    #join-btn, #change-name-btn, #start-btn, #lobby-btn {
+    #map-size-input {
+      width: 140px;
+    }
+
+    #name-input:focus, #room-name-input:focus, #map-size-input:focus {
+      border-color: #75e0c3;
+    }
+
+    #join-btn, #change-name-btn, #start-btn, #lobby-btn, #create-room-btn, #leave-room-btn, .join-room-btn {
       padding: 0.75rem 1.5rem;
       font-size: 1rem;
       border: none;
@@ -119,20 +169,27 @@
       transition: transform 0.1s;
     }
 
-    #join-btn, #change-name-btn, #lobby-btn {
-      background: #3498db;
+    #join-btn, #change-name-btn, #lobby-btn, #create-room-btn, #leave-room-btn, .join-room-btn {
+      background: #2a9d8f;
       color: #fff;
     }
 
     #start-btn {
-      background: #f59e0b;
-      color: #000;
+      background: #f4a261;
+      color: #16120b;
       font-size: 1.25rem;
       padding: 1rem 2.5rem;
       margin-top: 1rem;
+      width: 100%;
     }
 
-    #join-btn:hover, #change-name-btn:hover, #start-btn:hover, #lobby-btn:hover {
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+      transform: none !important;
+    }
+
+    #join-btn:hover, #change-name-btn:hover, #start-btn:hover, #lobby-btn:hover, #create-room-btn:hover, #leave-room-btn:hover, .join-room-btn:hover {
       transform: scale(1.05);
     }
 
@@ -147,6 +204,72 @@
       padding: 0.4rem 0;
       font-size: 1.1rem;
       justify-content: center;
+    }
+
+    .room-entry {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.85rem 0;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .room-entry:last-child {
+      border-bottom: none;
+    }
+
+    .current-room-entry {
+      background: rgba(117, 224, 195, 0.08);
+      margin: 0 -0.6rem;
+      padding-left: 0.6rem;
+      padding-right: 0.6rem;
+      border-radius: 8px;
+    }
+
+    .room-name {
+      font-weight: 700;
+      color: #f8fafc;
+    }
+
+    .room-meta,
+    .room-waiting p {
+      color: #9ca3af;
+      font-size: 0.9rem;
+      margin-top: 0.2rem;
+    }
+
+    .room-title-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: start;
+      margin-bottom: 1rem;
+    }
+
+    .creator-pill {
+      border: 1px solid rgba(244, 162, 97, 0.5);
+      color: #f4a261;
+      border-radius: 999px;
+      padding: 0.1rem 0.45rem;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    #map-size-form {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+      color: #cbd5e1;
+    }
+
+    .empty-state,
+    .room-waiting {
+      color: #9ca3af;
+      padding: 2rem 0;
     }
 
     .player-dot {
@@ -226,6 +349,40 @@
       10% { opacity: 1; transform: translateX(-50%) translateY(0); }
       80% { opacity: 1; }
       100% { opacity: 0; }
+    }
+
+    @media (max-width: 760px) {
+      body {
+        overflow: auto;
+        min-height: 100vh;
+      }
+
+      #app {
+        min-height: 100vh;
+        height: auto;
+        padding: 1rem 0;
+      }
+
+      #room-board {
+        grid-template-columns: 1fr;
+      }
+
+      #room-list-panel,
+      #current-room-panel {
+        min-height: 0;
+      }
+
+      #create-room-form,
+      #username-form {
+        flex-direction: column;
+      }
+
+      #name-input,
+      #room-name-input,
+      #join-btn,
+      #create-room-btn {
+        width: 100%;
+      }
     }
   </style>
 </head>

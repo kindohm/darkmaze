@@ -34,10 +34,32 @@ export type GameState = {
   winner: Player | null;
 };
 
-// Client → Server messages
-export type JoinMessage = {
-  type: "join";
+export type RoomSummary = {
+  id: string;
   name: string;
+  creatorId: string;
+  status: GameStatus;
+  players: Pick<Player, "id" | "name" | "color">[];
+};
+
+// Client → Server messages
+export type SetUsernameMessage = {
+  type: "set-username";
+  name: string;
+};
+
+export type CreateRoomMessage = {
+  type: "create-room";
+  name?: string;
+};
+
+export type JoinRoomMessage = {
+  type: "join-room";
+  roomId: string;
+};
+
+export type LeaveRoomMessage = {
+  type: "leave-room";
 };
 
 export type StartMessage = {
@@ -55,15 +77,23 @@ export type ReturnToLobbyMessage = {
 };
 
 export type ClientMessage =
-  | JoinMessage
+  | SetUsernameMessage
+  | CreateRoomMessage
+  | JoinRoomMessage
+  | LeaveRoomMessage
   | StartMessage
   | MoveMessage
   | ReturnToLobbyMessage;
 
 // Server → Client messages
-export type LobbyUpdateMessage = {
-  type: "lobby-update";
-  players: Pick<Player, "id" | "name" | "color">[];
+export type RoomsUpdateMessage = {
+  type: "rooms-update";
+  rooms: RoomSummary[];
+};
+
+export type RoomUpdateMessage = {
+  type: "room-update";
+  room: RoomSummary | null;
 };
 
 export type GameStartMessage = {
@@ -92,6 +122,7 @@ export type GameOverMessage = {
 
 export type LobbyReturnMessage = {
   type: "lobby-return";
+  room: RoomSummary;
 };
 
 export type PlayerIdMessage = {
@@ -107,7 +138,8 @@ export type DebuffAppliedMessage = {
 };
 
 export type ServerMessage =
-  | LobbyUpdateMessage
+  | RoomsUpdateMessage
+  | RoomUpdateMessage
   | GameStartMessage
   | StateUpdateMessage
   | GameOverMessage

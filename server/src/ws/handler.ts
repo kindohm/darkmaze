@@ -1,18 +1,18 @@
 import type { WebSocket } from "ws";
-import type {
-  ClientMessage,
-  ServerMessage,
-} from "maze-shared";
+import type { ClientMessage, ServerMessage } from "maze-shared";
 import { MOVE_INTERVAL_MS, NPC_SPEED_MULTIPLIER, NPC_DEBUFF_DURATION_MS, NPC_COUNT_PER_PLAYER } from "maze-shared";
 import {
-  getState,
-  addPlayer,
-  removePlayer,
-  getPlayer,
-  isLastPlayer,
+  createRoom,
+  getRoom,
+  getRoomSummaries,
+  getRoomSummary,
+  joinRoom,
+  removePlayerFromRoom,
+  updatePlayerName,
   startGame,
   endGame,
   returnToLobby,
+  type ServerRoom,
 } from "../game/state.js";
 import { movePlayer } from "../game/movement.js";
 import { revealAround } from "../game/visibility.js";
@@ -21,9 +21,17 @@ import { resetStats, initPlayerStats, recordStep, getStats } from "../game/stats
 import { getNpcs, resetNpcs, ensureNpcCount, moveNpcsRandom, checkNpcPlayerCollisions, removeNpc } from "../game/npc.js";
 import { resetDebuffs, applyDebuff, canMove } from "../game/debuff.js";
 
-type ClientSocket = WebSocket & { playerId?: string };
+type ClientSocket = WebSocket & {
+  playerId?: string;
+  username?: string;
+  roomId?: string;
+};
 
 const clients = new Set<ClientSocket>();
+const npcTickIntervals = new Map<string, ReturnType<typeof setInterval>>();
+
+let nextId = 1;
+let nextRoomId = 1;
 
 const send = (ws: ClientSocket, msg: ServerMessage): void => {
   if (ws.readyState === ws.OPEN) {
@@ -40,208 +48,257 @@ const broadcast = (msg: ServerMessage): void => {
   });
 };
 
-const broadcastLobbyUpdate = (): void => {
-  const state = getState();
-  broadcast({
-    type: "lobby-update",
-    players: state.players.map((p) => ({
-      id: p.id,
-      name: p.name,
-      color: p.color,
-    })),
+const broadcastRoom = (roomId: string, msg: ServerMessage): void => {
+  const data = JSON.stringify(msg);
+  clients.forEach((ws) => {
+    if (ws.roomId === roomId && ws.readyState === ws.OPEN) {
+      ws.send(data);
+    }
   });
 };
 
-const broadcastStateUpdate = (): void => {
-  const state = getState();
-  broadcast({
+const broadcastRoomsUpdate = (): void => {
+  broadcast({ type: "rooms-update", rooms: getRoomSummaries() });
+};
+
+const broadcastRoomUpdate = (roomId: string): void => {
+  broadcastRoom(roomId, { type: "room-update", room: getRoomSummary(roomId) });
+};
+
+const broadcastStateUpdate = (room: ServerRoom): void => {
+  broadcastRoom(room.id, {
     type: "state-update",
-    players: state.players,
-    revealedTiles: state.revealedTiles,
-    npcs: getNpcs(),
+    players: room.players,
+    revealedTiles: room.revealedTiles,
+    npcs: getNpcs(room.id),
   });
 };
 
-let nextId = 1;
-let npcTickInterval: ReturnType<typeof setInterval> | null = null;
-
-const stopNpcTick = (): void => {
-  if (npcTickInterval) {
-    clearInterval(npcTickInterval);
-    npcTickInterval = null;
-  }
+const stopNpcTick = (roomId: string): void => {
+  const interval = npcTickIntervals.get(roomId);
+  if (!interval) return;
+  clearInterval(interval);
+  npcTickIntervals.delete(roomId);
 };
 
-const startNpcTick = (): void => {
-  stopNpcTick();
+const startNpcTick = (roomId: string): void => {
+  stopNpcTick(roomId);
   const tickMs = MOVE_INTERVAL_MS * NPC_SPEED_MULTIPLIER;
-  npcTickInterval = setInterval(() => {
-    const state = getState();
-    if (state.status !== "playing") {
-      stopNpcTick();
+
+  npcTickIntervals.set(roomId, setInterval(() => {
+    const room = getRoom(roomId);
+    if (!room || room.status !== "playing") {
+      stopNpcTick(roomId);
       return;
     }
 
-    moveNpcsRandom(state.maze, state.players);
+    moveNpcsRandom(room.maze, room.players, room.id);
 
-    // Check collisions
-    const collisions = checkNpcPlayerCollisions(state.players);
+    const collisions = checkNpcPlayerCollisions(room.players, room.id);
     for (const { npcId, playerId } of collisions) {
-      removeNpc(npcId);
-      applyDebuff(playerId);
-      const hitPlayer = state.players.find((p) => p.id === playerId);
-      broadcast({ type: "debuff-applied", playerId, playerName: hitPlayer?.name ?? "Unknown", durationMs: NPC_DEBUFF_DURATION_MS });
+      removeNpc(npcId, room.id);
+      applyDebuff(playerId, room.id);
+      const hitPlayer = room.players.find((p) => p.id === playerId);
+      broadcastRoom(room.id, {
+        type: "debuff-applied",
+        playerId,
+        playerName: hitPlayer?.name ?? "Unknown",
+        durationMs: NPC_DEBUFF_DURATION_MS,
+      });
     }
 
-    // Respawn to maintain count
-    ensureNpcCount(state.players.length * NPC_COUNT_PER_PLAYER, state.maze, state.players);
-
-    broadcastStateUpdate();
-  }, tickMs);
+    ensureNpcCount(room.players.length * NPC_COUNT_PER_PLAYER, room.maze, room.players, room.id);
+    broadcastStateUpdate(room);
+  }, tickMs));
 };
 
-const handleJoin = (ws: ClientSocket, name: string): void => {
-  // If already joined, update name instead of creating new player
-  if (ws.playerId) {
-    const existing = getPlayer(ws.playerId);
-    if (existing) {
-      existing.name = name;
-      broadcastLobbyUpdate();
-      return;
-    }
+const leaveCurrentRoom = (ws: ClientSocket): void => {
+  if (!ws.playerId || !ws.roomId) return;
+
+  const previousRoomId = ws.roomId;
+  const room = removePlayerFromRoom(ws.playerId);
+  ws.roomId = undefined;
+  send(ws, { type: "room-update", room: null });
+
+  if (!room) return;
+  if (room.players.length === 0) {
+    stopNpcTick(previousRoomId);
+    resetNpcs(previousRoomId);
+    resetDebuffs(previousRoomId);
+    resetStats(previousRoomId);
+  } else {
+    broadcastRoomUpdate(previousRoomId);
+  }
+  broadcastRoomsUpdate();
+};
+
+const handleSetUsername = (ws: ClientSocket, name: string): void => {
+  const trimmedName = name.trim();
+  if (!trimmedName) return;
+
+  if (!ws.playerId) {
+    ws.playerId = `player-${nextId++}`;
+    send(ws, { type: "player-id", id: ws.playerId });
   }
 
-  const id = `player-${nextId++}`;
-  addPlayer(id, name);
-  ws.playerId = id;
-
-  send(ws, { type: "player-id", id });
-  broadcastLobbyUpdate();
+  ws.username = trimmedName;
+  updatePlayerName(ws.playerId, trimmedName);
+  broadcastRoomsUpdate();
+  if (ws.roomId) broadcastRoomUpdate(ws.roomId);
 };
 
-const handleStart = (mapSize?: number): void => {
-  const state = getState();
-  if (state.status !== "lobby" || state.players.length === 0) return;
+const handleCreateRoom = (ws: ClientSocket, name?: string): void => {
+  if (!ws.playerId || !ws.username) return;
 
-  startGame(mapSize);
-  resetStats();
-  resetNpcs();
-  resetDebuffs();
+  leaveCurrentRoom(ws);
 
-  // Init stats and reveal initial area around each player
-  state.players.forEach((p) => {
-    initPlayerStats(p.id, p.position, state.goalPosition!);
-    revealAround(p.position, state.revealedTiles);
+  const roomId = `room-${nextRoomId++}`;
+  const roomName = name?.trim() || `${ws.username}'s room`;
+  const room = createRoom(roomId, roomName, ws.playerId, ws.username);
+  ws.roomId = room.id;
+
+  send(ws, { type: "room-update", room: getRoomSummary(room.id) });
+  broadcastRoomsUpdate();
+};
+
+const handleJoinRoom = (ws: ClientSocket, roomId: string): void => {
+  if (!ws.playerId || !ws.username) return;
+
+  const room = joinRoom(roomId, ws.playerId, ws.username);
+  if (!room) return;
+
+  ws.roomId = room.id;
+  broadcastRoomUpdate(room.id);
+  broadcastRoomsUpdate();
+};
+
+const handleStart = (ws: ClientSocket, mapSize?: number): void => {
+  if (!ws.playerId || !ws.roomId) return;
+
+  const room = getRoom(ws.roomId);
+  if (!room || room.status !== "lobby" || room.players.length === 0) return;
+  if (room.creatorId !== ws.playerId) return;
+
+  startGame(mapSize, room.id);
+  resetStats(room.id);
+  resetNpcs(room.id);
+  resetDebuffs(room.id);
+
+  room.players.forEach((p) => {
+    initPlayerStats(p.id, p.position, room.goalPosition!, room.id);
+    revealAround(p.position, room.revealedTiles);
   });
 
-  // Spawn NPCs equal to player count
-  ensureNpcCount(state.players.length * NPC_COUNT_PER_PLAYER, state.maze, state.players);
+  ensureNpcCount(room.players.length * NPC_COUNT_PER_PLAYER, room.maze, room.players, room.id);
 
-  broadcast({
+  broadcastRoom(room.id, {
     type: "game-start",
-    maze: state.maze,
-    players: state.players,
-    revealedTiles: state.revealedTiles,
-    npcs: getNpcs(),
+    maze: room.maze,
+    players: room.players,
+    revealedTiles: room.revealedTiles,
+    npcs: getNpcs(room.id),
   });
-
-  startNpcTick();
+  broadcastRoomsUpdate();
+  startNpcTick(room.id);
 };
 
-const handleMove = (ws: ClientSocket, direction: ClientMessage & { type: "move" }): void => {
-  const state = getState();
-  if (state.status !== "playing" || !ws.playerId) return;
+const handleMove = (ws: ClientSocket, msg: ClientMessage & { type: "move" }): void => {
+  if (!ws.playerId || !ws.roomId) return;
 
-  const player = getPlayer(ws.playerId);
-  if (!player) return;
+  const room = getRoom(ws.roomId);
+  if (!room || room.status !== "playing") return;
 
-  // Rate-limit moves (debuffed players move at half speed)
-  if (!canMove(ws.playerId)) return;
+  const player = room.players.find((p) => p.id === ws.playerId);
+  if (!player || !canMove(ws.playerId, room.id)) return;
 
-  const newPos = movePlayer(player.position, direction.direction, state.maze);
+  const newPos = movePlayer(player.position, msg.direction, room.maze);
   if (newPos.x === player.position.x && newPos.y === player.position.y) return;
 
   player.position = newPos;
-  revealAround(newPos, state.revealedTiles);
-  recordStep(player.id, newPos, state.goalPosition!);
+  revealAround(newPos, room.revealedTiles);
+  recordStep(player.id, newPos, room.goalPosition!, room.id);
 
-  // Check NPC collisions after player move
-  const collisions = checkNpcPlayerCollisions(state.players);
+  const collisions = checkNpcPlayerCollisions(room.players, room.id);
   for (const { npcId, playerId } of collisions) {
-    removeNpc(npcId);
-    applyDebuff(playerId);
-    const hitPlayer = state.players.find((p) => p.id === playerId);
-    broadcast({ type: "debuff-applied", playerId, playerName: hitPlayer?.name ?? "Unknown", durationMs: NPC_DEBUFF_DURATION_MS });
+    removeNpc(npcId, room.id);
+    applyDebuff(playerId, room.id);
+    const hitPlayer = room.players.find((p) => p.id === playerId);
+    broadcastRoom(room.id, {
+      type: "debuff-applied",
+      playerId,
+      playerName: hitPlayer?.name ?? "Unknown",
+      durationMs: NPC_DEBUFF_DURATION_MS,
+    });
   }
-  ensureNpcCount(state.players.length * NPC_COUNT_PER_PLAYER, state.maze, state.players);
+  ensureNpcCount(room.players.length * NPC_COUNT_PER_PLAYER, room.maze, room.players, room.id);
 
-  if (checkObjective(player, state.maze)) {
-    stopNpcTick();
-    endGame(player);
-    broadcast({
+  if (checkObjective(player, room.maze)) {
+    stopNpcTick(room.id);
+    endGame(player, room.id);
+    broadcastRoom(room.id, {
       type: "game-over",
       winner: { id: player.id, name: player.name, color: player.color },
-      players: state.players,
-      revealedTiles: state.revealedTiles,
-      maze: state.maze,
-      playerStats: getStats(),
+      players: room.players,
+      revealedTiles: room.revealedTiles,
+      maze: room.maze,
+      playerStats: getStats(room.id),
     });
+    broadcastRoomsUpdate();
     return;
   }
 
-  broadcastStateUpdate();
+  broadcastStateUpdate(room);
 };
 
-const handleReturnToLobby = (): void => {
-  stopNpcTick();
-  resetNpcs();
-  resetDebuffs();
-  returnToLobby();
-  broadcast({ type: "lobby-return" });
-  broadcastLobbyUpdate();
+const handleReturnToLobby = (ws: ClientSocket): void => {
+  if (!ws.roomId) return;
+  const room = getRoom(ws.roomId);
+  if (!room) return;
+
+  stopNpcTick(room.id);
+  resetNpcs(room.id);
+  resetDebuffs(room.id);
+  returnToLobby(room.id);
+
+  broadcastRoom(room.id, { type: "lobby-return", room: getRoomSummary(room.id)! });
+  broadcastRoomUpdate(room.id);
+  broadcastRoomsUpdate();
 };
 
 const handleDisconnect = (ws: ClientSocket): void => {
   clients.delete(ws);
-  if (!ws.playerId) return;
-
-  removePlayer(ws.playerId);
-  const state = getState();
-
-  if (state.status === "playing" && isLastPlayer()) {
-    stopNpcTick();
-    resetNpcs();
-    resetDebuffs();
-    returnToLobby();
-    return;
-  }
-
-  if (state.status === "lobby") {
-    broadcastLobbyUpdate();
-  } else if (state.status === "playing") {
-    broadcastStateUpdate();
-  }
+  leaveCurrentRoom(ws);
 };
 
 export const handleConnection = (ws: ClientSocket): void => {
   clients.add(ws);
+  send(ws, { type: "rooms-update", rooms: getRoomSummaries() });
 
   ws.on("message", (data) => {
     try {
       const msg: ClientMessage = JSON.parse(data.toString());
 
       switch (msg.type) {
-        case "join":
-          handleJoin(ws, msg.name);
+        case "set-username":
+          handleSetUsername(ws, msg.name);
+          break;
+        case "create-room":
+          handleCreateRoom(ws, msg.name);
+          break;
+        case "join-room":
+          handleJoinRoom(ws, msg.roomId);
+          break;
+        case "leave-room":
+          leaveCurrentRoom(ws);
           break;
         case "start":
-          handleStart(msg.mapSize);
+          handleStart(ws, msg.mapSize);
           break;
         case "move":
           handleMove(ws, msg);
           break;
         case "return-to-lobby":
-          handleReturnToLobby();
+          handleReturnToLobby(ws);
           break;
       }
     } catch {
@@ -252,13 +309,10 @@ export const handleConnection = (ws: ClientSocket): void => {
   ws.on("close", () => handleDisconnect(ws));
 };
 
-// For testing
 export const resetHandler = (): void => {
-  stopNpcTick();
-  resetNpcs();
-  resetDebuffs();
+  npcTickIntervals.forEach((interval) => clearInterval(interval));
+  npcTickIntervals.clear();
   clients.clear();
   nextId = 1;
+  nextRoomId = 1;
 };
-
-export { clients, broadcast, send };

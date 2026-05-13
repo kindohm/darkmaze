@@ -25,7 +25,7 @@ export const createUsernameScreen = (
   const handleJoin = (): void => {
     const name = nameInput.value.trim();
     if (!name) return;
-    wsClient.send({ type: "join", name });
+    wsClient.send({ type: "set-username", name });
     onJoined(name);
   };
 

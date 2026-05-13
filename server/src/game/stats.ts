@@ -2,20 +2,26 @@ import type { Position, PlayerStats } from "maze-shared";
 
 export type StatsMap = Record<string, PlayerStats>;
 
-let statsMap: StatsMap = {};
+let statsByRoom: Record<string, StatsMap> = { default: {} };
 
-export const resetStats = (): void => {
-  statsMap = {};
+const getRoomStats = (roomId = "default"): StatsMap => {
+  statsByRoom[roomId] = statsByRoom[roomId] ?? {};
+  return statsByRoom[roomId];
 };
 
-export const getStats = (): StatsMap => statsMap;
+export const resetStats = (roomId = "default"): void => {
+  statsByRoom[roomId] = {};
+};
+
+export const getStats = (roomId = "default"): StatsMap => getRoomStats(roomId);
 
 export const initPlayerStats = (
   playerId: string,
   position: Position,
-  goalPosition: Position
+  goalPosition: Position,
+  roomId = "default"
 ): void => {
-  statsMap[playerId] = {
+  getRoomStats(roomId)[playerId] = {
     stepsTaken: 0,
     closestDistanceToGoal: calcDistance(position, goalPosition),
   };
@@ -24,9 +30,10 @@ export const initPlayerStats = (
 export const recordStep = (
   playerId: string,
   newPosition: Position,
-  goalPosition: Position
+  goalPosition: Position,
+  roomId = "default"
 ): void => {
-  const stats = statsMap[playerId];
+  const stats = getRoomStats(roomId)[playerId];
   if (!stats) return;
 
   stats.stepsTaken += 1;

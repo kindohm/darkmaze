@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createLobby } from "./lobby.js";
 import type { WsClient } from "../ws/client.js";
-import type { LobbyUpdateMessage } from "maze-shared";
+import type { RoomSummary } from "maze-shared";
 import { DEFAULT_MAP_SIZE } from "maze-shared";
 
 const createMockWsClient = (): WsClient => ({
@@ -12,6 +12,15 @@ const createMockWsClient = (): WsClient => ({
   offMessage: vi.fn(),
 });
 
+const room = (overrides: Partial<RoomSummary> = {}): RoomSummary => ({
+  id: "room-1",
+  name: "Alpha",
+  creatorId: "p1",
+  status: "lobby",
+  players: [{ id: "p1", name: "Alice", color: "#e74c3c" }],
+  ...overrides,
+});
+
 describe("lobby", () => {
   let container: HTMLDivElement;
 
@@ -19,131 +28,55 @@ describe("lobby", () => {
     container = document.createElement("div");
   });
 
-  it("renders change name form and player list", () => {
+  it("renders room creation and room panels", () => {
     const ws = createMockWsClient();
-    createLobby(container, ws);
+    createLobby(container, ws, "p1", "Alice");
 
-    expect(container.querySelector("#name-input")).toBeTruthy();
-    expect(container.querySelector("#change-name-btn")).toBeTruthy();
-    expect(container.querySelector("#player-list")).toBeTruthy();
+    expect(container.querySelector("#room-name-input")).toBeTruthy();
+    expect(container.querySelector("#create-room-btn")).toBeTruthy();
+    expect(container.querySelector("#room-list")).toBeTruthy();
+    expect(container.querySelector("#current-room-panel")).toBeTruthy();
   });
 
-  it("pre-fills name input with localPlayerName", () => {
+  it("sends create-room message", () => {
     const ws = createMockWsClient();
-    createLobby(container, ws, "Alice");
+    createLobby(container, ws, "p1", "Alice");
 
-    const input = container.querySelector("#name-input") as HTMLInputElement;
-    expect(input.value).toBe("Alice");
-  });
+    const input = container.querySelector("#room-name-input") as HTMLInputElement;
+    const btn = container.querySelector("#create-room-btn") as HTMLButtonElement;
 
-  it("sends join message on change name click", () => {
-    const ws = createMockWsClient();
-    createLobby(container, ws);
-
-    const input = container.querySelector("#name-input") as HTMLInputElement;
-    const btn = container.querySelector("#change-name-btn") as HTMLButtonElement;
-
-    input.value = "Alice";
+    input.value = "Friday Maze";
     btn.click();
 
-    expect(ws.send).toHaveBeenCalledWith({ type: "join", name: "Alice" });
+    expect(ws.send).toHaveBeenCalledWith({ type: "create-room", name: "Friday Maze" });
   });
 
-  it("does not send with empty name", () => {
+  it("renders rooms and sends join-room message", () => {
     const ws = createMockWsClient();
-    createLobby(container, ws);
+    const lobby = createLobby(container, ws, "p2", "Bob");
 
-    const btn = container.querySelector("#change-name-btn") as HTMLButtonElement;
+    lobby.updateRooms({ type: "rooms-update", rooms: [room()] });
+
+    const entry = container.querySelector(".room-entry");
+    const btn = container.querySelector(".join-room-btn") as HTMLButtonElement;
+
+    expect(entry?.textContent).toContain("Alpha");
     btn.click();
-
-    expect(ws.send).not.toHaveBeenCalled();
+    expect(ws.send).toHaveBeenCalledWith({ type: "join-room", roomId: "room-1" });
   });
 
-  it("start button hidden initially with no players", () => {
+  it("renders current room participants", () => {
     const ws = createMockWsClient();
-    createLobby(container, ws);
-
-    const startBtn = container.querySelector("#start-btn") as HTMLButtonElement;
-    expect(startBtn.style.display).toBe("none");
-  });
-
-  it("shows start button immediately when created with initialPlayers", () => {
-    const ws = createMockWsClient();
-    createLobby(container, ws, undefined, [
-      { id: "p1", name: "Alice", color: "#e74c3c" },
-    ]);
-
-    const startBtn = container.querySelector("#start-btn") as HTMLButtonElement;
-    expect(startBtn.style.display).toBe("block");
-  });
-
-  it("renders initial players on creation", () => {
-    const ws = createMockWsClient();
-    createLobby(container, ws, undefined, [
-      { id: "p1", name: "Alice", color: "#e74c3c" },
-      { id: "p2", name: "Bob", color: "#3498db" },
-    ]);
+    createLobby(container, ws, "p1", "Alice", [room()], room());
 
     const entries = container.querySelectorAll(".player-entry");
-    expect(entries).toHaveLength(2);
+    expect(entries).toHaveLength(1);
+    expect(container.textContent).toContain("creator");
   });
 
-  it("shows start button when update has players", () => {
+  it("creator can start game with map size", () => {
     const ws = createMockWsClient();
-    const { update } = createLobby(container, ws);
-
-    const startBtn = container.querySelector("#start-btn") as HTMLButtonElement;
-    expect(startBtn.style.display).toBe("none");
-
-    update({
-      type: "lobby-update",
-      players: [{ id: "p1", name: "Alice", color: "#e74c3c" }],
-    });
-
-    expect(startBtn.style.display).toBe("block");
-  });
-
-  it("hides start button when update has no players", () => {
-    const ws = createMockWsClient();
-    const { update } = createLobby(container, ws);
-
-    update({
-      type: "lobby-update",
-      players: [{ id: "p1", name: "Alice", color: "#e74c3c" }],
-    });
-
-    const startBtn = container.querySelector("#start-btn") as HTMLButtonElement;
-    expect(startBtn.style.display).toBe("block");
-
-    update({ type: "lobby-update", players: [] });
-    expect(startBtn.style.display).toBe("none");
-  });
-
-  it("updates player list", () => {
-    const ws = createMockWsClient();
-    const { update } = createLobby(container, ws);
-
-    const msg: LobbyUpdateMessage = {
-      type: "lobby-update",
-      players: [
-        { id: "p1", name: "Alice", color: "#e74c3c" },
-        { id: "p2", name: "Bob", color: "#3498db" },
-      ],
-    };
-    update(msg);
-
-    const entries = container.querySelectorAll(".player-entry");
-    expect(entries).toHaveLength(2);
-  });
-
-  it("sends start message with map size on start click", () => {
-    const ws = createMockWsClient();
-    const { update } = createLobby(container, ws);
-
-    update({
-      type: "lobby-update",
-      players: [{ id: "p1", name: "Alice", color: "#e74c3c" }],
-    });
+    createLobby(container, ws, "p1", "Alice", [room()], room());
 
     const startBtn = container.querySelector("#start-btn") as HTMLButtonElement;
     startBtn.click();
@@ -151,23 +84,40 @@ describe("lobby", () => {
     expect(ws.send).toHaveBeenCalledWith({ type: "start", mapSize: DEFAULT_MAP_SIZE });
   });
 
-  it("renders map size input with default value", () => {
+  it("enables start after player id arrives late", () => {
     const ws = createMockWsClient();
-    createLobby(container, ws);
+    const lobby = createLobby(container, ws, "", "Alice", [room()], room());
 
-    const mapSizeInput = container.querySelector("#map-size-input") as HTMLInputElement;
-    expect(mapSizeInput).toBeTruthy();
-    expect(mapSizeInput.value).toBe(String(DEFAULT_MAP_SIZE));
+    let startBtn = container.querySelector("#start-btn") as HTMLButtonElement;
+    expect(startBtn.disabled).toBe(true);
+
+    lobby.updateLocalPlayerId("p1");
+
+    startBtn = container.querySelector("#start-btn") as HTMLButtonElement;
+    expect(startBtn.disabled).toBe(false);
+  });
+
+  it("non-creator cannot start game", () => {
+    const ws = createMockWsClient();
+    createLobby(container, ws, "p2", "Bob", [room()], room());
+
+    const startBtn = container.querySelector("#start-btn") as HTMLButtonElement;
+    expect(startBtn.disabled).toBe(true);
+  });
+
+  it("sends leave-room message", () => {
+    const ws = createMockWsClient();
+    createLobby(container, ws, "p1", "Alice", [room()], room());
+
+    const leaveBtn = container.querySelector("#leave-room-btn") as HTMLButtonElement;
+    leaveBtn.click();
+
+    expect(ws.send).toHaveBeenCalledWith({ type: "leave-room" });
   });
 
   it("clamps map size to min/max", () => {
     const ws = createMockWsClient();
-    const { update } = createLobby(container, ws);
-
-    update({
-      type: "lobby-update",
-      players: [{ id: "p1", name: "Alice", color: "#e74c3c" }],
-    });
+    createLobby(container, ws, "p1", "Alice", [room()], room());
 
     const mapSizeInput = container.querySelector("#map-size-input") as HTMLInputElement;
     mapSizeInput.value = "10";
@@ -178,9 +128,18 @@ describe("lobby", () => {
     expect(ws.send).toHaveBeenCalledWith({ type: "start", mapSize: 50 });
   });
 
+  it("updates current room", () => {
+    const ws = createMockWsClient();
+    const lobby = createLobby(container, ws, "p1", "Alice");
+
+    lobby.updateRoom({ type: "room-update", room: room({ name: "Beta" }) });
+
+    expect(container.textContent).toContain("Beta");
+  });
+
   it("destroy clears container", () => {
     const ws = createMockWsClient();
-    const { destroy } = createLobby(container, ws);
+    const { destroy } = createLobby(container, ws, "p1", "Alice");
     destroy();
     expect(container.innerHTML).toBe("");
   });

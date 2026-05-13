@@ -44,7 +44,7 @@ describe("username screen", () => {
     input.value = "Alice";
     btn.click();
 
-    expect(ws.send).toHaveBeenCalledWith({ type: "join", name: "Alice" });
+    expect(ws.send).toHaveBeenCalledWith({ type: "set-username", name: "Alice" });
     expect(onJoined).toHaveBeenCalledWith("Alice");
   });
 
@@ -57,7 +57,7 @@ describe("username screen", () => {
     input.value = "Bob";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
 
-    expect(ws.send).toHaveBeenCalledWith({ type: "join", name: "Bob" });
+    expect(ws.send).toHaveBeenCalledWith({ type: "set-username", name: "Bob" });
     expect(onJoined).toHaveBeenCalledWith("Bob");
   });
 

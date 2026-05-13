@@ -3,9 +3,11 @@ import type {
   GameStartMessage,
   StateUpdateMessage,
   GameOverMessage,
-  LobbyUpdateMessage,
+  RoomsUpdateMessage,
+  RoomUpdateMessage,
   DebuffAppliedMessage,
   Player,
+  RoomSummary,
 } from "maze-shared";
 import { createWsClient } from "./ws/client.js";
 import { createUsernameScreen } from "./username/username.js";
@@ -28,7 +30,8 @@ const inputHandler = createInputHandler(wsClient);
 let currentScreen: Screen = "username";
 let localPlayerId = "";
 let localPlayerName = "";
-let lastKnownPlayers: Pick<Player, "id" | "name" | "color">[] = [];
+let lastKnownRooms: RoomSummary[] = [];
+let currentRoom: RoomSummary | null = null;
 
 // Game state
 let gameState: RenderState = {
@@ -81,7 +84,7 @@ const showScreen = (screen: Screen): void => {
       showScreen("lobby");
     });
   } else if (screen === "lobby") {
-    lobbyInstance = createLobby(app, wsClient, localPlayerName || undefined, lastKnownPlayers);
+    lobbyInstance = createLobby(app, wsClient, localPlayerId, localPlayerName, lastKnownRooms, currentRoom);
   } else if (screen === "game") {
     renderer.resize();
     inputHandler.start();
@@ -107,18 +110,28 @@ const handleMessage = (msg: ServerMessage): void => {
     case "player-id":
       localPlayerId = msg.id;
       gameState.localPlayerId = msg.id;
+      lobbyInstance?.updateLocalPlayerId(msg.id);
       break;
 
-    case "lobby-update": {
-      const lobbyMsg = msg as LobbyUpdateMessage;
-      lastKnownPlayers = lobbyMsg.players;
-      lobbyInstance?.update(lobbyMsg);
-      // Track local player name
-      const me = lobbyMsg.players.find((p) => p.id === localPlayerId);
-      if (me) {
-        localPlayerName = me.name;
-        updateHeader();
+    case "rooms-update": {
+      const roomsMsg = msg as RoomsUpdateMessage;
+      lastKnownRooms = roomsMsg.rooms;
+      lobbyInstance?.updateRooms(roomsMsg);
+      if (currentRoom) {
+        currentRoom = roomsMsg.rooms.find((room) => room.id === currentRoom?.id) ?? currentRoom;
       }
+      break;
+    }
+
+    case "room-update": {
+      const roomMsg = msg as RoomUpdateMessage;
+      currentRoom = roomMsg.room;
+      if (currentRoom) {
+        window.location.hash = `room/${currentRoom.id}`;
+      } else if (window.location.hash) {
+        history.replaceState(null, document.title, window.location.pathname + window.location.search);
+      }
+      lobbyInstance?.updateRoom(roomMsg);
       break;
     }
 
@@ -171,6 +184,7 @@ const handleMessage = (msg: ServerMessage): void => {
     }
 
     case "lobby-return":
+      currentRoom = msg.room;
       showScreen("lobby");
       break;
 

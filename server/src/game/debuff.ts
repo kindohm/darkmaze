@@ -1,39 +1,49 @@
 import { NPC_DEBUFF_DURATION_MS, MOVE_INTERVAL_MS } from "maze-shared";
 
-// Maps playerId -> debuff expiry timestamp
-let debuffs: Record<string, number> = {};
-// Maps playerId -> last processed move timestamp
-let lastMoveTime: Record<string, number> = {};
-
-export const resetDebuffs = (): void => {
-  debuffs = {};
-  lastMoveTime = {};
+type DebuffState = {
+  debuffs: Record<string, number>;
+  lastMoveTime: Record<string, number>;
 };
 
-export const applyDebuff = (playerId: string): void => {
-  debuffs[playerId] = Date.now() + NPC_DEBUFF_DURATION_MS;
+let states: Record<string, DebuffState> = {
+  default: { debuffs: {}, lastMoveTime: {} },
 };
 
-export const isDebuffed = (playerId: string): boolean => {
-  const expiry = debuffs[playerId];
+const getState = (roomId = "default"): DebuffState => {
+  states[roomId] = states[roomId] ?? { debuffs: {}, lastMoveTime: {} };
+  return states[roomId];
+};
+
+export const resetDebuffs = (roomId = "default"): void => {
+  states[roomId] = { debuffs: {}, lastMoveTime: {} };
+};
+
+export const applyDebuff = (playerId: string, roomId = "default"): void => {
+  getState(roomId).debuffs[playerId] = Date.now() + NPC_DEBUFF_DURATION_MS;
+};
+
+export const isDebuffed = (playerId: string, roomId = "default"): boolean => {
+  const state = getState(roomId);
+  const expiry = state.debuffs[playerId];
   if (!expiry) return false;
   if (Date.now() >= expiry) {
-    delete debuffs[playerId];
+    delete state.debuffs[playerId];
     return false;
   }
   return true;
 };
 
-export const canMove = (playerId: string): boolean => {
+export const canMove = (playerId: string, roomId = "default"): boolean => {
+  const state = getState(roomId);
   const now = Date.now();
-  const interval = isDebuffed(playerId) ? MOVE_INTERVAL_MS * 2 : MOVE_INTERVAL_MS;
-  const last = lastMoveTime[playerId] ?? 0;
+  const interval = isDebuffed(playerId, roomId) ? MOVE_INTERVAL_MS * 2 : MOVE_INTERVAL_MS;
+  const last = state.lastMoveTime[playerId] ?? 0;
 
   if (now - last < interval) return false;
 
-  lastMoveTime[playerId] = now;
+  state.lastMoveTime[playerId] = now;
   return true;
 };
 
-export const getDebuffExpiry = (playerId: string): number | undefined =>
-  debuffs[playerId];
+export const getDebuffExpiry = (playerId: string, roomId = "default"): number | undefined =>
+  getState(roomId).debuffs[playerId];

@@ -1,3 +1,4 @@
 - always use the caveman skill
 - always use the mike-style skill
 - when performing frontend work, use the frontend-design skill
+- use the mike-game skill
